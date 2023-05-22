@@ -1,115 +1,105 @@
--- This lib based on https://github.com/ldb/lua-multipart-post
 --[[
-    ####--------------------------------####
-    #--# Author:   by uriid1            #--#
-    #--# license:  GNU GPL              #--#
-    #--# telegram: @main_moderator      #--#
-    #--# Mail:     appdurov@gmail.com   #--#
-    ####--------------------------------####
+  ####--------------------------------####
+  #--# Author:   by uriid1            #--#
+  #--# license:  GNU GPL              #--#
+  #--# telegram: @main_moderator      #--#
+  #--# Mail:     appdurov@gmail.com   #--#
+  ####--------------------------------####
 --]]
 
-local os = os
 local string = string
 local table = table
 local pairs = pairs
 local tostring = tostring
 
--- Formating
---
-local function table_print_format(t_gen, p, s)
-  if s == nil then
-    t_gen[#t_gen + 1] = p
+local function format(resTable, formatString, value)
+  if value == nil then
+    table.insert(resTable, formatString)
     return
   end
 
-  -- If 's' is exists
-  t_gen[#t_gen + 1] = string.format(p, s)
+  -- formatString exists
+  table.insert(resTable, string.format(formatString, value))
 end
 
--- Append Data
---
-local function append_data(t_gen, key, data, extra)
-  table_print_format(t_gen, "content-disposition: form-data; name=\"%s\"", key)
-  if extra.filename then
-    table_print_format(t_gen, "; filename=\"%s\"", extra.filename)
+local function append_data(resTable, name, data, extra)
+  format(resTable, "content-disposition: form-data; name=\"%s\"", name)
+
+  if extra then
+    if extra.filename then
+      format(resTable, "; filename=\"%s\"", extra.filename)
+    end
+
+    if extra.content_type then
+      format(resTable, "\r\ncontent-type: %s", extra.content_type)
+    end
+
+    if extra.content_transfer_encoding then
+      format(resTable, "\r\ncontent-transfer-encoding: %s", extra.content_transfer_encoding)
+    end
   end
 
-  if extra.content_type then
-    table_print_format(t_gen, "\r\ncontent-type: %s", extra.content_type)
-  end
-
-  if extra.content_transfer_encoding then
-    table_print_format(t_gen, "\r\ncontent-transfer-encoding: %s", extra.content_transfer_encoding)
-  end
-
-  table_print_format(t_gen, "\r\n\r\n")
-  table_print_format(t_gen, data)
-  table_print_format(t_gen, "\r\n")
+  format(resTable, "\r\n\r\n")
+  format(resTable, data)
+  format(resTable, "\r\n")
 end
 
--- Switch type
---
-local t_switch_type = {
-  ["string"] = function(val, key, t_gen)
-    append_data(t_gen, key, val, {})
-  end;
+local function switch_type(resTable, key, val, errs)
+  local type = type(val)
 
-  ["table"] = function(val, key, t_gen)
-    append_data(t_gen, key, val.data, {
+  if type == 'string' then
+    append_data(resTable, key, val)
+  elseif type == 'number' then
+    append_data(resTable, key, val)
+  elseif type == 'boolean' then
+    append_data(resTable, key, tostring(val))
+  elseif type == 'table' then
+    if not val.data then
+      table.insert(errs, {
+        type = 'Error';
+        info = '\'data\' not provided';
+      })
+      return
+    end
+
+    append_data(resTable, key, val.data, {
       filename = val.filename or val.name;
       content_type = val.content_type or val.mimetype or "application/octet-stream";
       content_transfer_encoding = val.content_transfer_encoding or "binary";
     })
-  end;
-
-  ["number"] = function(val, key, t_gen)
-    append_data(t_gen, key, val, {})
-  end;
-
-  ["boolean"] = function(val, key, t_gen)
-    append_data(t_gen, key, tostring(val), {})
   end
-}
-
-local function switch_type(type, val, key, t_gen)
-  if t_switch_type[type] == nil then
-    error(string.format("unexpected type %s", type))
-  end
-
-  t_switch_type[type](val, key, t_gen)
 end
 
 -- Generate boundary
 local gen_boundary = function()
-  local t = {"BOUNDARY-"}
+  local res = { "BOUNDARY-" }
   
   for i = 2, 17 do
-    t[i] = string.char(math.random(65, 90))
+    res[i] = string.char(math.random(65, 90))
   end
+  table.insert(res, "-BOUNDARY")
   
-  t[18] = "-BOUNDARY"
-  
-  return table.concat(t)
+  return table.concat(res)
 end
 
 -- Encode
---
-local function encode(request_body)
-  if not request_body then
-    return
+local function encode(body)
+  if type(body) ~= 'table' then
+    return nil, nil, nil
   end
 
   -- Gen
   local boundary = gen_boundary()
-  local t_gen = {}
+  local errs = {}
+  local resTable = {}
 
-  for key, val in pairs(request_body) do
-    table_print_format(t_gen, "--%s\r\n", boundary)
-    switch_type(type(val), val, key, t_gen)
+  for key, val in pairs(body) do
+    format(resTable, "--%s\r\n", boundary)
+    switch_type(resTable, key, val, errs)
   end
-  table_print_format(t_gen, "--%s--\r\n", boundary)
+  format(resTable, "--%s--\r\n", boundary)
 
-  return table.concat(t_gen), boundary
+  return table.concat(resTable), boundary, errs
 end
 
 return encode
